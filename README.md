@@ -57,6 +57,7 @@ Medidos el 2026-10-17 con el fork en `fix/16660-json-views-generator`
 | `module` (1 módulo, `:grails-data-hibernate7-core`) | **12 min** |
 | `docs` | **7 min** |
 | `subbuild` (`build-logic`) | **8 min** |
+| `subbuild` (`end-to-end`, con fixture G7 en JDK 17) | **30 min** |
 | `validate` | **6 min** |
 | `suite` (`-PskipTests -PskipCodeStyle`) | **26 min** |
 | `buildhealth` | **48 min** |
