@@ -37,7 +37,7 @@ on:
         default: grails-forge
         options: [build-logic, grails-gradle, grails-forge, end-to-end]
 
-run-name: "gate [${{ inputs.profile }}] ${{ inputs.ref }} ${{ inputs.modules }}"
+run-name: "gate [${{ inputs.profile }}] ${{ inputs.ref }} ${{ inputs.modules }} ${{ inputs.profile == 'subbuild' && inputs.dir || '' }} ${{ inputs.tasks }}"
 
 concurrency:
   # Perfiles distintos de la misma rama corren en paralelo; el mismo perfil en
