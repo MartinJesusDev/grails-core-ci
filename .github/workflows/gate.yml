@@ -16,12 +16,15 @@ on:
         description: "Qué validar"
         type: choice
         default: module
-        options: [module, core, suite, all-suites, analyze, validate, buildhealth, docs, subbuild, gate]
+        options: [module, core, suite, all-suites, analyze, validate, buildhealth, docs, subbuild, fix, task, gate]
       modules:
         description: "module: proyectos Gradle, p.ej. ':grails-views-gson :grails-core'"
         default: ""
       extra:
         description: "Tareas/argumentos extra de Gradle (se añaden al final; sin ; | & $ ` < > \\)"
+        default: ""
+      tasks:
+        description: "task: tareas completas a ejecutar; subbuild: sobreescribe las tareas por defecto del build anidado"
         default: ""
       jdk:
         description: "JDK (21 por defecto; 25 para el island Micronaut)"
@@ -62,6 +65,7 @@ jobs:
           REF: ${{ inputs.ref }}
           PROFILE: ${{ inputs.profile }}
           MODULES: ${{ inputs.modules }}
+          TASKS: ${{ inputs.tasks }}
           EXTRA: ${{ inputs.extra }}
           SUBDIR: ${{ inputs.dir }}
         run: ./.github/scripts/gate.sh
@@ -75,6 +79,14 @@ jobs:
             grails-core/**/build/test-results/**
             grails-core/grails-test-report/build/reports/**
           retention-days: 7
+          if-no-files-found: ignore
+      - name: Changes patch (fixers)
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: changes-${{ github.run_id }}-${{ inputs.profile }}
+          path: changes.patch
+          retention-days: 14
           if-no-files-found: ignore
 
   all-suites:
@@ -100,6 +112,7 @@ jobs:
           PROFILE: all-suites
           LANE: ${{ matrix.lane }}
           MODULES: ${{ inputs.modules }}
+          TASKS: ${{ inputs.tasks }}
           EXTRA: ${{ inputs.extra }}
         run: ./.github/scripts/gate.sh
       - name: Reports on failure
@@ -112,6 +125,14 @@ jobs:
             grails-core/**/build/test-results/**
             grails-core/grails-test-report/build/reports/**
           retention-days: 7
+          if-no-files-found: ignore
+      - name: Changes patch (fixers)
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: changes-${{ github.run_id }}-suite-${{ matrix.lane }}
+          path: changes.patch
+          retention-days: 14
           if-no-files-found: ignore
 
   analyze:
@@ -135,6 +156,7 @@ jobs:
           PROFILE: analyze
           LANE: ${{ matrix.lane }}
           MODULES: ${{ inputs.modules }}
+          TASKS: ${{ inputs.tasks }}
           EXTRA: ${{ inputs.extra }}
         run: ./.github/scripts/gate.sh
       - name: Reports on failure
@@ -147,6 +169,14 @@ jobs:
             grails-core/**/build/test-results/**
             grails-core/grails-test-report/build/reports/**
           retention-days: 7
+          if-no-files-found: ignore
+      - name: Changes patch (fixers)
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: changes-${{ github.run_id }}-${{ matrix.lane }}
+          path: changes.patch
+          retention-days: 14
           if-no-files-found: ignore
 
   gate:
@@ -170,6 +200,7 @@ jobs:
           PROFILE: gate
           LANE: ${{ matrix.lane }}
           MODULES: ${{ inputs.modules }}
+          TASKS: ${{ inputs.tasks }}
           EXTRA: ${{ inputs.extra }}
         run: ./.github/scripts/gate.sh
       - name: Reports on failure
@@ -182,4 +213,12 @@ jobs:
             grails-core/**/build/test-results/**
             grails-core/grails-test-report/build/reports/**
           retention-days: 7
+          if-no-files-found: ignore
+      - name: Changes patch (fixers)
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: changes-${{ github.run_id }}-gate-${{ matrix.lane }}
+          path: changes.patch
+          retention-days: 14
           if-no-files-found: ignore
