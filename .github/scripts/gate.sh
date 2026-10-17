@@ -47,7 +47,10 @@ case "${PROFILE}" in
         ARGS="validateDependencyVersions validateProductionClasspath validateBomProperties validateActions --continue"
         ;;
     buildhealth)
-        ARGS="buildHealth --continue"
+        # buildHealth explota jars y crece mucho en el daemon; el repo lo corre
+        # en CI con 5G (ver .github/workflows/build-health.yml).
+        export GRADLE_OPTS="-Dorg.gradle.jvmargs=-Xmx5G"
+        ARGS="buildHealth --continue --max-workers=4"
         ;;
     docs)
         ARGS=":grails-doc:publishGuide -x aggregateGroovydoc"

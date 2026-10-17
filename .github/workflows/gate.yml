@@ -37,7 +37,9 @@ on:
 run-name: "gate [${{ inputs.profile }}] ${{ inputs.ref }} ${{ inputs.modules }}"
 
 concurrency:
-  group: gate-${{ inputs.ref }}
+  # Perfiles distintos de la misma rama corren en paralelo; el mismo perfil en
+  # la misma rama se serializa (y un tercero cancelaría al que espera).
+  group: gate-${{ inputs.ref }}-${{ inputs.profile }}-${{ inputs.dir }}
   cancel-in-progress: false
 
 permissions:

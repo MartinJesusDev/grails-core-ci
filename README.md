@@ -38,8 +38,9 @@ gh workflow run gate.yml --repo MartinJesusDev/grails-core-ci \
 ## Concurrencia y coste
 
 Cada gate scoped usa 1 job (los perfiles `analyze` y `gate`, 3 y 5). En repos
-públicos los runners estándar son gratuitos. Los gates de la misma rama se
-serializan (`concurrency: gate-<ref>`); los de ramas distintas corren en paralelo.
+públicos los runners estándar son gratuitos. Los gates de la misma rama **y
+perfil** se serializan (`concurrency: gate-<ref>-<profile>`); perfiles o ramas
+distintos corren en paralelo.
 
 Los reportes de fallo (violations y test-results) se suben como artefactos con
 7 días de retención.
