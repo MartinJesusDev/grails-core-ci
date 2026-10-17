@@ -1,0 +1,146 @@
+name: Scoped Gate
+
+# Gate remoto y acotado para las tareas de grails-core: corre solo lo que el
+# cambio necesita, en vez de la matriz completa de ~60 jobs del repo.
+#
+# Los "cierre" completos son el perfil `gate`, que reparte los lanes como jobs
+# en paralelo (estilo, análisis, RAT, validaciones y core) con --rerun-tasks.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Rama, tag o SHA de MartinJesusDev/grails-core"
+        required: true
+      profile:
+        description: "Qué validar"
+        type: choice
+        default: module
+        options: [module, core, suite, analyze, validate, buildhealth, docs, subbuild, gate]
+      modules:
+        description: "module: proyectos Gradle, p.ej. ':grails-views-gson :grails-core'"
+        default: ""
+      extra:
+        description: "Tareas/argumentos extra de Gradle (se añaden al final; sin ; | & $ ` < > \\)"
+        default: ""
+      jdk:
+        description: "JDK (21 por defecto; 25 para el island Micronaut)"
+        type: choice
+        default: "21"
+        options: ["21", "25"]
+      dir:
+        description: "subbuild: build anidado"
+        type: choice
+        default: grails-forge
+        options: [build-logic, grails-gradle, grails-forge, end-to-end]
+
+run-name: "gate [${{ inputs.profile }}] ${{ inputs.ref }} ${{ inputs.modules }}"
+
+concurrency:
+  group: gate-${{ inputs.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  scoped:
+    name: "${{ inputs.profile }}"
+    if: ${{ inputs.profile != 'analyze' && inputs.profile != 'gate' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: ./.github/actions/setup
+        with:
+          ref: ${{ inputs.ref }}
+          jdk: ${{ inputs.jdk }}
+      - name: Run gate
+        env:
+          REF: ${{ inputs.ref }}
+          PROFILE: ${{ inputs.profile }}
+          MODULES: ${{ inputs.modules }}
+          EXTRA: ${{ inputs.extra }}
+          SUBDIR: ${{ inputs.dir }}
+        run: ./.github/scripts/gate.sh
+      - name: Reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: reports-${{ github.run_id }}-${{ inputs.profile }}
+          path: |
+            grails-core/**/build/reports/violations/**
+            grails-core/**/build/test-results/**
+            grails-core/grails-test-report/build/reports/**
+          retention-days: 7
+          if-no-files-found: ignore
+
+  analyze:
+    name: "analyze: ${{ matrix.lane }}"
+    if: ${{ inputs.profile == 'analyze' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: [style, analysis, rat]
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: ./.github/actions/setup
+        with:
+          ref: ${{ inputs.ref }}
+          jdk: ${{ inputs.jdk }}
+      - name: Run gate
+        env:
+          REF: ${{ inputs.ref }}
+          PROFILE: analyze
+          LANE: ${{ matrix.lane }}
+          MODULES: ${{ inputs.modules }}
+          EXTRA: ${{ inputs.extra }}
+        run: ./.github/scripts/gate.sh
+      - name: Reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: reports-${{ github.run_id }}-${{ matrix.lane }}
+          path: |
+            grails-core/**/build/reports/violations/**
+            grails-core/**/build/test-results/**
+            grails-core/grails-test-report/build/reports/**
+          retention-days: 7
+          if-no-files-found: ignore
+
+  gate:
+    name: "gate: ${{ matrix.lane }}"
+    if: ${{ inputs.profile == 'gate' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: [style, analysis, rat, validate, core]
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: ./.github/actions/setup
+        with:
+          ref: ${{ inputs.ref }}
+          jdk: ${{ inputs.jdk }}
+      - name: Run gate
+        env:
+          REF: ${{ inputs.ref }}
+          PROFILE: gate
+          LANE: ${{ matrix.lane }}
+          MODULES: ${{ inputs.modules }}
+          EXTRA: ${{ inputs.extra }}
+        run: ./.github/scripts/gate.sh
+      - name: Reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: reports-${{ github.run_id }}-gate-${{ matrix.lane }}
+          path: |
+            grails-core/**/build/reports/violations/**
+            grails-core/**/build/test-results/**
+            grails-core/grails-test-report/build/reports/**
+          retention-days: 7
+          if-no-files-found: ignore
