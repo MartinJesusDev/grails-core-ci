@@ -118,6 +118,46 @@ de `.agents/skills/`.
 | `dependencyInsight`, `jar`, `compileGroovy`, `installDist`, `groovydoc`… | skills / CI | `task` (`tasks`) |
 | `bootRun`, `bootWar`, fixers de IDE, `--debug-jvm` | desarrollo de apps | **local** (no aplica en remoto) |
 
+## Cierre de una tarea (receta canónica)
+
+Del trabajo nuevo hasta el PR. Los pasos 1-2 son locales; el resto, remoto y gratuito.
+
+| # | Paso | Dónde | Qué demuestra | Tiempo |
+|---|---|---|---|---|
+| 1 | `gx :<módulos>:test` (+ `integrationTest`/`testCli` si el cambio toca esos source sets) | local | Regla 13 de grails-core: **todos** los tests del módulo afectado | 1-10 min |
+| 2 | Commit(s) + `git push -u origin <rama>` | local | — | — |
+| 3 | `/grails-core-ci-close module <módulos>` | remoto | Lo mismo que el paso 1 en runner limpio (caché fría): lo que la caché local oculta | 6-12 min |
+| 4 | **`gate`** | remoto | El cierre: estilo + PMD/SpotBugs + RAT + BOM/dependencias + `build --rerun-tasks -PonlyCoreTests` (lo que pide la plantilla de PR) | 60 min |
+| 5 | **`all-suites`** — si el cambio toca GORM, seguridad, cache o funcionales; y para un cierre literal de la plantilla de PR | remoto | Hibernate 5/7, MongoDB, Redis, Neo4j, Spring Security y funcionales | 50 min |
+| 6 | Condicionales según el cambio (tabla de abajo) | remoto | buildhealth / validate / docs / subbuild | 6-48 min |
+| 7 | PR a `apache/grails-core` | ASF | **El gate definitivo de merge** (matriz completa) | 2-4 h |
+
+Los pasos 4-6 corren **en paralelo** (perfiles distintos, grupos de concurrencia separados): reloj total ≈ 60 min.
+
+### Condicionales por lo que toca el cambio
+
+| Si el cambio toca… | Añade |
+|---|---|
+| `build-logic` | `subbuild dir=build-logic` |
+| `grails-gradle` | `subbuild dir=grails-gradle` |
+| `grails-forge` | `subbuild dir=grails-forge` |
+| `end-to-end` o el flujo de plugins | `subbuild dir=end-to-end` |
+| Dependencias / BOM (`dependencies.gradle`) | `validate` + `buildhealth` |
+| `grails-doc` | `docs` |
+| `.github/workflows/` | `task tasks=validateActions` |
+| Violaciones de estilo | `fix` (publica `changes.patch`) |
+
+### Lo que NO hay que lanzar
+
+- La **matriz completa del fork** (`gradle.yml` y compañía): duplica lo que ya validan `gate` + `all-suites`; solo si quieres ver el resultado antes de que corra en ASF.
+- El **gate local** (regla 12): sustituido por los perfiles remotos (decisión documentada en `~/.config/opencode/AGENTS.md`).
+
+### Qué prueba cada cosa (para no pedir peras al olmo)
+
+- `gate` **no** corre las suites de contenedores ni los funcionales: eso es `all-suites`.
+- `gate` es la forma paralela del gate de la regla 12: mismo estilo/análisis/RAT + los tests core; sin `clean` (el runner ya es limpio) y sin el agregado `:grails-test-report:check` (los resultados por job quedan en los artefactos).
+- El CI de ASF es el único visto bueno del PR: nada de esto lo sustituye.
+
 ## Leer los resultados
 
 - `~/.local/bin/gh-ci-watch --run-id <id> --repo MartinJesusDev/grails-core-ci` — espera y resume
