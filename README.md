@@ -45,6 +45,24 @@ distintos corren en paralelo.
 Los reportes de fallo (violations y test-results) se suben como artefactos con
 7 días de retención.
 
+## Tiempos medidos
+
+Medidos el 2026-10-17 con el fork en `fix/16660-json-views-generator`
+(`ubuntu-latest`, 4 cores, caché de Gradle fría + caché remota Develocity en lectura):
+
+| Perfil | Reloj |
+|---|---|
+| `module` (1 módulo, `:grails-views-gson`) | **6 min** |
+| `module` (1 módulo, `:grails-data-hibernate7-core`) | **12 min** |
+| `docs` | **7 min** |
+| `subbuild` (`build-logic`) | **8 min** |
+| `validate` | **6 min** |
+| `suite` (`-PskipTests -PskipCodeStyle`) | **26 min** |
+| `buildhealth` | **48 min** |
+| `gate` | **60 min** (lo fija el lane `core`; `style` 20 min, `analysis` 7, `rat` 2, `validate` 2) |
+
+Para comparar: la matriz completa del repo son ~60 jobs y 2-4 h de reloj.
+
 ## Mantenimiento
 
 - Las versiones de `actions/*` y `gradle/actions/setup-gradle` se mantienen
