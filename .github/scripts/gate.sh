@@ -70,10 +70,27 @@ case "${PROFILE}" in
                 ARGS="build --continue"
                 ;;
             end-to-end)
-                # El flujo documentado en end-to-end/README.md: publicar el
-                # fixture en el repo Maven de pruebas antes de correr el check.
+                # Flujo de end-to-end/README.md y .github/workflows/end-to-end.yml:
+                # (1) publicar Grails y los plugins en el repo Maven de pruebas,
+                # (2) construir el fixture precompilado Grails 7 con JDK 17 (el
+                # del toolcache del runner), (3) check del build end-to-end.
                 ( cd grails-gradle && ./gradlew publishAllPublicationsToTestCaseMavenRepoRepository -PskipTests --continue )
                 ./gradlew publishAllPublicationsToTestCaseMavenRepoRepository -PskipTests --continue
+
+                fixture_jdk="${JAVA_HOME_17_X64:-}"
+                [[ -n "${fixture_jdk}" ]] || fail "end-to-end: el runner no expone JAVA_HOME_17_X64 (JDK 17) para el fixture G7"
+                ( cd end-to-end/legacy-g7-command-plugin && JAVA_HOME="${fixture_jdk}" ./gradlew jar --stacktrace ) ||
+                    fail "end-to-end: falló la construcción del fixture G7"
+
+                # El fixture debe ser bytecode Java 17 (major 61): si se construyera
+                # con otro JDK, el check pasaría sin probar nada.
+                fixture_jar=$(ls end-to-end/legacy-g7-command-plugin/build/libs/*.jar 2>/dev/null | head -1 || true)
+                fixture_major=$(unzip -p "${fixture_jar:-/nonexistent}" legacy/g7/commands/HelloG7PrecompiledCommand.class 2>/dev/null |
+                    od -An -t u1 -j 6 -N 2 | awk 'NF { print $1 * 256 + $2; exit }' || true)
+                [[ "${fixture_major}" == "61" ]] ||
+                    fail "end-to-end: el fixture no es bytecode Java 17 (major=${fixture_major:-?}, jar=${fixture_jar:-?})"
+
+                export DO_NOT_CACHE_TESTS=1
                 cd end-to-end
                 ARGS="check --continue"
                 ;;
