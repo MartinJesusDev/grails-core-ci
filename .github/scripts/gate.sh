@@ -145,11 +145,16 @@ case "${PROFILE}" in
         ARGS="${TASKS}"
         ;;
     fix)
-        # Arregla lo que detectan los analizadores del repo. Ojo: Spotless NO
-        # existe en la raíz (solo en grails-forge, vía
-        # `subbuild dir=grails-forge tasks=spotlessApply`). Los cambios que
-        # haga cualquier perfil se publican como changes.patch.
-        ARGS="codenarcFix --continue"
+        # Arregla violaciones de CodeNarc de los módulos indicados. El
+        # codenarcFix del repo reescribe TODOS los .groovy del proyecto
+        # (incluidos test sources que el chequeo no mira), así que a nivel raíz
+        # produce un parche enorme; por eso exige `modules`. Para el repo
+        # completo, a sabiendas: `task tasks=codenarcFix`.
+        [[ -n "${MODULES}" ]] ||
+            fail "el perfil fix requiere modules (a nivel raíz reescribe todo el repo; usa task tasks=codenarcFix si lo quieres entero)"
+        FIX_TASKS=""
+        for m in ${MODULES}; do FIX_TASKS="${FIX_TASKS} ${m}:codenarcFix"; done
+        ARGS="${FIX_TASKS} --continue"
         ;;
     *)
         fail "perfil desconocido: '${PROFILE}'"
@@ -179,8 +184,13 @@ changed=$(grep -c . <<<"${status_output}" || true)
 if (( changed > 0 )); then
     git add -A -N >/dev/null 2>&1 || true
     git diff >"${GITHUB_WORKSPACE}/changes.patch" || true
-    echo "::warning::la ejecución dejó ${changed} ruta(s) modificada(s); el parche va en el artefacto changes.patch"
-    echo "${status_output}" | head -40
+    patch_kb=$(( $(stat -c%s "${GITHUB_WORKSPACE}/changes.patch" 2>/dev/null || echo 0) / 1024 ))
+    echo "::warning::la ejecución dejó ${changed} ruta(s) modificada(s); changes.patch (${patch_kb} KB) en los artefactos"
+    if (( patch_kb > 200 )); then
+        echo "::warning::parche grande (${patch_kb} KB): ¿seguro que querías un fixer a nivel de todo el repo?"
+    fi
+    # sed lee toda la entrada: `head` cerraría el pipe y con set -e mataría el script.
+    sed -n '1,40p' <<<"${status_output}"
 else
     rm -f "${GITHUB_WORKSPACE}/changes.patch"
 fi

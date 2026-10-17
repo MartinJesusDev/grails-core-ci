@@ -45,7 +45,8 @@ La tabla completa (qué hace cada uno, cuándo usarlo, tiempos medidos) está en
 ## Añadir o cambiar un perfil
 
 1. Añade el caso en el `case "${PROFILE}"` de `gate.sh` (y en el `case "${LANE}"` si es un perfil con
-   lanes).
+   lanes). Si el perfil muta el árbol, exige los inputs que acoten el daño (como `fix`, que requiere
+   `modules` porque su tarea a nivel raíz reescribe todo el repo).
 2. Si es un perfil con lanes, añade el job con su matriz en `gate.yml` y **exclúyelo** del `if:` del
    job `scoped` (si no, correría dos veces).
 3. Si necesita un input nuevo, decláralo en `workflow_dispatch.inputs` y pásalo en el `env:` de cada

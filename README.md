@@ -30,7 +30,7 @@ gh workflow run gate.yml --repo MartinJesusDev/grails-core-ci \
 | `buildhealth` | `buildHealth --continue --max-workers=4` con el daemon a 5G (como CI) | Cambios que afectan al grafo de dependencias entre módulos | 48 min |
 | `docs` | `:grails-doc:publishGuide -x aggregateGroovydoc` | Cambios en documentación o en la guía | 7 min |
 | `subbuild` | `cd <dir> && ./gradlew <tareas>` | Cambios en los builds anidados: `build-logic` (`check`), `grails-gradle` (`build`), `grails-forge` (`build`), `end-to-end` (flujo completo con fixture G7) | 8-31 min |
-| `fix` | `codenarcFix --continue` (todos los módulos) | Arreglar violaciones de CodeNarc sin ejecutarlo en local. **Publica el parche** | ~10 min |
+| `fix` | `:m:codenarcFix` de los proyectos en `modules` | Arreglar violaciones de CodeNarc de lo que tocaste sin ejecutarlo en local. **Exige `modules`** y publica el parche | ~5-10 min |
 | `task` | `./gradlew <tasks>` tal cual | Cualquier tarea no cubierta: `dependencyInsight`, `compileGroovy`, `:grails-shell-cli:installDist`, `spotlessApply` de un subbuild… | variable |
 | `gate` | 5 lanes: `style`, `analysis`, `rat`, `validate`, `core` — con `--rerun-tasks` en los pesados | **El cierre antes del PR** (lo que pide la plantilla de PR) | 60 min |
 
@@ -51,10 +51,12 @@ gh workflow run gate.yml --repo MartinJesusDev/grails-core-ci \
   - `-f dir=grails-gradle -f tasks=aggregateStyleViolations`.
   - `dir=end-to-end` con `tasks` **omite** el flujo de setup (publicaciones + fixture G7); úsalo solo
     con `tasks=check` sabiendo que el setup no se ha hecho.
-- **`fix`**: los fixers escriben en el árbol y el runner es efímero → el resultado se publica como
-  **`changes.patch`** (ver más abajo). Existe además `-Pgrails.code-style.codenarc.fix=true`, que hace
-  que `codenarcMain` dependa del fixer (arreglar mientras comprueba); se puede usar vía `extra` en
-  `analyze`.
+- **`fix`**: el `codenarcFix` del repo reescribe **todos** los `.groovy` del proyecto con regex (incluidos
+  los test sources, que el chequeo de CodeNarc tiene deshabilitados), así que a nivel raíz genera un
+  parche de más de 1 MB con cambios que CI **no** exige. Por eso el perfil **exige `modules`** y corre
+  `:m:codenarcFix`; si de verdad quieres el repo entero, a sabiendas: `task tasks=codenarcFix`.
+  Existe además `-Pgrails.code-style.codenarc.fix=true` (hace que `codenarcMain` dependa del fixer,
+  arreglar mientras comprueba), usable vía `extra` en `analyze`.
 
 ## Inputs
 
@@ -105,7 +107,7 @@ de `.agents/skills/`.
 | `aggregateAnalysisViolations`, `-Pgrails.code-analysis.*` | CI `codeanalysis.yml` | `analyze` (lane `analysis`) |
 | `rat` | CI `rat.yml` | `analyze` (lane `rat`) |
 | `aggregateViolations` | regla 12 local | `analyze` + `core` (o `gate`), sin `clean` (el runner es limpio) |
-| `codenarcFix` | skill violation-fixer | **`fix`** |
+| `codenarcFix` | skill violation-fixer | **`fix`** (exige `modules`; el repo-wide se hace con `task tasks=codenarcFix`) |
 | `spotlessApply` | skill violation-fixer (solo existe en `grails-forge`) | `subbuild dir=grails-forge tasks=spotlessApply` |
 | `:m:test`, `--tests`, `:m:integrationTest`, `:m:testCli` | DEVELOPMENT | `module` (+ `extra`) |
 | `check`, `-PskipCodeStyle`, `-Ponly…Tests` | DEVELOPMENT | `suite` / `all-suites` / `gate` |
