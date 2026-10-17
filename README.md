@@ -18,6 +18,7 @@ gh workflow run gate.yml --repo MartinJesusDev/grails-core-ci \
 | `module` | `:m:test` de los módulos indicados | iteración y regla 13 (tests del módulo afectado) |
 | `core` | `build -PonlyCoreTests -PskipCodeStyle` | la suite core sin suites especiales |
 | `suite` | `check` + los flags de `extra` (`-PonlyMongodbTests -PskipCodeStyle`…) | suites funcionales y de contenedores |
+| `all-suites` | 7 lanes en paralelo: `functional`, `hibernate5`, `hibernate7`, `mongodb`, `redis`, `neo4j`, `springsecurity` | **la suite completa de tests** (equivalente a la matriz de CI) |
 | `analyze` | 3 jobs en paralelo: `style` (`aggregateStyleViolations validateRepositoryConventions`), `analysis` (`aggregateAnalysisViolations`), `rat` | estilo, PMD/SpotBugs, licencias |
 | `validate` | `validateDependencyVersions validateProductionClasspath validateBomProperties validateActions` | BOM y dependencias |
 | `buildhealth` | `buildHealth` | clases duplicadas |

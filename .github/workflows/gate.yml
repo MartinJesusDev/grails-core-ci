@@ -16,7 +16,7 @@ on:
         description: "Qué validar"
         type: choice
         default: module
-        options: [module, core, suite, analyze, validate, buildhealth, docs, subbuild, gate]
+        options: [module, core, suite, all-suites, analyze, validate, buildhealth, docs, subbuild, gate]
       modules:
         description: "module: proyectos Gradle, p.ej. ':grails-views-gson :grails-core'"
         default: ""
@@ -48,7 +48,7 @@ permissions:
 jobs:
   scoped:
     name: "${{ inputs.profile }}"
-    if: ${{ inputs.profile != 'analyze' && inputs.profile != 'gate' }}
+    if: ${{ inputs.profile != 'analyze' && inputs.profile != 'gate' && inputs.profile != 'all-suites' }}
     runs-on: ubuntu-latest
     timeout-minutes: 300
     steps:
@@ -70,6 +70,43 @@ jobs:
         uses: actions/upload-artifact@v7.0.1
         with:
           name: reports-${{ github.run_id }}-${{ inputs.profile }}
+          path: |
+            grails-core/**/build/reports/violations/**
+            grails-core/**/build/test-results/**
+            grails-core/grails-test-report/build/reports/**
+          retention-days: 7
+          if-no-files-found: ignore
+
+  all-suites:
+    name: "suite: ${{ matrix.lane }}"
+    if: ${{ inputs.profile == 'all-suites' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        # Una lane por suite especializada; réplica de los jobs equivalentes
+        # de .github/workflows/gradle.yml.
+        lane: [functional, hibernate5, hibernate7, mongodb, redis, neo4j, springsecurity]
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: ./.github/actions/setup
+        with:
+          ref: ${{ inputs.ref }}
+          jdk: ${{ inputs.jdk }}
+      - name: Run gate
+        env:
+          REF: ${{ inputs.ref }}
+          PROFILE: all-suites
+          LANE: ${{ matrix.lane }}
+          MODULES: ${{ inputs.modules }}
+          EXTRA: ${{ inputs.extra }}
+        run: ./.github/scripts/gate.sh
+      - name: Reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: reports-${{ github.run_id }}-suite-${{ matrix.lane }}
           path: |
             grails-core/**/build/reports/violations/**
             grails-core/**/build/test-results/**

@@ -80,6 +80,22 @@ case "${PROFILE}" in
             *) fail "subbuild: dir desconocido '${SUBDIR}'" ;;
         esac
         ;;
+    all-suites)
+        # Las suites especializadas, una por lane en paralelo (en un solo job
+        # el conjunto se pasa del límite de 6 h de GitHub). Los flags replican
+        # los jobs equivalentes de .github/workflows/gradle.yml.
+        case "${LANE}" in
+            functional)     FLAGS="-PonlyFunctionalTests -PskipCodeStyle -PskipHibernate5Tests -PskipHibernate7Tests -PskipMongodbTests -PskipNeo4jTests -PskipSpringSecurityTests -PskipRedisTests" ;;
+            hibernate5)     FLAGS="-PonlyHibernate5Tests -PskipCodeStyle" ;;
+            hibernate7)     FLAGS="-PonlyHibernate7Tests -PskipCodeStyle" ;;
+            mongodb)        FLAGS="-PonlyMongodbTests -PskipCodeStyle" ;;
+            redis)          FLAGS="-PonlyRedisTests -PskipCodeStyle" ;;
+            neo4j)          FLAGS="-PonlyNeo4jTests -PskipCodeStyle" ;;
+            springsecurity) FLAGS="-PonlySpringSecurityTests -PskipCodeStyle" ;;
+            *) fail "all-suites: lane desconocido '${LANE}'" ;;
+        esac
+        ARGS="check --continue ${FLAGS}"
+        ;;
     analyze|gate)
         case "${LANE}" in
             style)
