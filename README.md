@@ -60,7 +60,10 @@ Medidos el 2026-10-17 con el fork en `fix/16660-json-views-generator`
 | `validate` | **6 min** |
 | `suite` (`-PskipTests -PskipCodeStyle`) | **26 min** |
 | `buildhealth` | **48 min** |
+| `all-suites` | **50 min** (7 lanes; la más lenta `mongodb` 50 min, `neo4j` 49, `hibernate5` 42, `springsecurity` 36, `functional` 34, `hibernate7` 34, `redis` 32) |
 | `gate` | **60 min** (lo fija el lane `core`; `style` 20 min, `analysis` 7, `rat` 2, `validate` 2) |
+
+Las lanes de `all-suites` corren una configuración por suite (JDK 21 y versiones de contenedor por defecto); la matriz de CI añade las variantes JDK 25 / indy / versiones de contenedor, que se obtienen con el input `jdk=25`.
 
 Para comparar: la matriz completa del repo son ~60 jobs y 2-4 h de reloj.
 
