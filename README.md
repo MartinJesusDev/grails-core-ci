@@ -55,8 +55,11 @@ gh workflow run gate.yml --repo MartinJesusDev/grails-core-ci \
   los test sources, que el chequeo de CodeNarc tiene deshabilitados), así que a nivel raíz genera un
   parche de más de 1 MB con cambios que CI **no** exige. Por eso el perfil **exige `modules`** y corre
   `:m:codenarcFix`; si de verdad quieres el repo entero, a sabiendas: `task tasks=codenarcFix`.
-  Existe además `-Pgrails.code-style.codenarc.fix=true` (hace que `codenarcMain` dependa del fixer,
-  arreglar mientras comprueba), usable vía `extra` en `analyze`.
+  **Úsalo solo cuando `analyze` tenga violaciones**: si el estilo está verde, el parche llevará cambios
+  que el PR no pide (churn) y no conviene aplicarlo — medido: 26 KB en `:grails-views-gson` sobre una
+  rama con el estilo en verde.
+  Alternativa que arregla y verifica en el mismo ámbito que el chequeo:
+  `analyze extra="-Pgrails.code-style.codenarc.fix=true"` (hace que `codenarcMain` dependa del fixer).
 
 ## Inputs
 

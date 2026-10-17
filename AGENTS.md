@@ -100,4 +100,7 @@ gh run download <id> --repo MartinJesusDev/grails-core-ci
 - `end-to-end` necesita el fixture G7 en JDK 17 y depende de `JAVA_HOME_17_X64` del runner; si el
   runner deja de exponerlo, el perfil falla con mensaje explícito (nunca da un falso verde).
 - `spotlessApply` no existe en la raíz de grails-core; solo en `grails-forge` (vía `subbuild`).
+- `fix` exige `modules` y solo merece la pena cuando `analyze` tiene violaciones: su tarea reescribe
+  más de lo que el chequeo mira (incluye test sources), así que con el estilo en verde el parche es
+  churn que el PR no debe llevar.
 - El CI del PR en apache/grails-core es independiente y no es reducible: este repo es pre-vuelo.
