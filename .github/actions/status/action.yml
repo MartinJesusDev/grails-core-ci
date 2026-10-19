@@ -16,6 +16,10 @@ inputs:
   result:
     description: Resultado del job (job.status)
     required: true
+  started-at:
+    description: Inicio del run (github.run_started_at); se pasa desde el workflow
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -29,7 +33,7 @@ runs:
         RESULT: ${{ inputs.result }}
         RUN_ID: ${{ github.run_id }}
         RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        STARTED_AT: ${{ github.run_started_at }}
+        STARTED_AT: ${{ inputs.started-at }}
       run: |
         set -euo pipefail
         file="status-${PROFILE}-${LANE}.json"

@@ -97,6 +97,7 @@ jobs:
           lane: scoped
           ref: ${{ inputs.ref }}
           result: ${{ job.status }}
+          started-at: ${{ github.run_started_at }}
 
   all-suites:
     name: "suite: ${{ matrix.lane }}"
@@ -152,6 +153,7 @@ jobs:
           lane: ${{ matrix.lane }}
           ref: ${{ inputs.ref }}
           result: ${{ job.status }}
+          started-at: ${{ github.run_started_at }}
 
   analyze:
     name: "analyze: ${{ matrix.lane }}"
@@ -205,6 +207,7 @@ jobs:
           lane: ${{ matrix.lane }}
           ref: ${{ inputs.ref }}
           result: ${{ job.status }}
+          started-at: ${{ github.run_started_at }}
 
   gate:
     name: "gate: ${{ matrix.lane }}"
@@ -258,6 +261,7 @@ jobs:
           lane: ${{ matrix.lane }}
           ref: ${{ inputs.ref }}
           result: ${{ job.status }}
+          started-at: ${{ github.run_started_at }}
 
   status:
     name: "status"
