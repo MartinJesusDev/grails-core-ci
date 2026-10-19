@@ -17,7 +17,7 @@ inputs:
     description: Resultado del job (job.status)
     required: true
   started-at:
-    description: Inicio del run (github.run_started_at); se pasa desde el workflow
+    description: Inicio de la lane (JOB_STARTED_AT, fijado por el paso "Mark start")
     required: false
     default: ""
 
@@ -37,8 +37,8 @@ runs:
       run: |
         set -euo pipefail
         file="status-${PROFILE}-${LANE}.json"
-        # started_at es el inicio del run, no del job: sobra para ordenar y
-        # comparar; añade un paso "Mark start" si necesitas la duración exacta.
+        # started_at lo fija el paso "Mark start" de cada job (inicio de la lane);
+        # si faltara (job cancelado antes), queda vacío y el agregado lo tolera.
         jq -n \
           --argjson run_id "$RUN_ID" \
           --arg profile "$PROFILE" \

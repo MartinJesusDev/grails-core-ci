@@ -55,6 +55,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 300
     steps:
+      - name: Mark start
+        run: echo "JOB_STARTED_AT=$(date -u +%FT%TZ)" >> "$GITHUB_ENV"
       - uses: actions/checkout@v7.0.1
       - uses: ./.github/actions/setup
         with:
@@ -97,7 +99,7 @@ jobs:
           lane: scoped
           ref: ${{ inputs.ref }}
           result: ${{ job.status }}
-          started-at: ${{ github.run_started_at }}
+          started-at: ${{ env.JOB_STARTED_AT }}
 
   all-suites:
     name: "suite: ${{ matrix.lane }}"
@@ -111,6 +113,8 @@ jobs:
         # de .github/workflows/gradle.yml.
         lane: [functional, hibernate5, hibernate7, mongodb, redis, neo4j, springsecurity]
     steps:
+      - name: Mark start
+        run: echo "JOB_STARTED_AT=$(date -u +%FT%TZ)" >> "$GITHUB_ENV"
       - uses: actions/checkout@v7.0.1
       - uses: ./.github/actions/setup
         with:
@@ -153,7 +157,7 @@ jobs:
           lane: ${{ matrix.lane }}
           ref: ${{ inputs.ref }}
           result: ${{ job.status }}
-          started-at: ${{ github.run_started_at }}
+          started-at: ${{ env.JOB_STARTED_AT }}
 
   analyze:
     name: "analyze: ${{ matrix.lane }}"
@@ -165,6 +169,8 @@ jobs:
       matrix:
         lane: [style, analysis, rat]
     steps:
+      - name: Mark start
+        run: echo "JOB_STARTED_AT=$(date -u +%FT%TZ)" >> "$GITHUB_ENV"
       - uses: actions/checkout@v7.0.1
       - uses: ./.github/actions/setup
         with:
@@ -207,7 +213,7 @@ jobs:
           lane: ${{ matrix.lane }}
           ref: ${{ inputs.ref }}
           result: ${{ job.status }}
-          started-at: ${{ github.run_started_at }}
+          started-at: ${{ env.JOB_STARTED_AT }}
 
   gate:
     name: "gate: ${{ matrix.lane }}"
@@ -219,6 +225,8 @@ jobs:
       matrix:
         lane: [style, analysis, rat, validate, core]
     steps:
+      - name: Mark start
+        run: echo "JOB_STARTED_AT=$(date -u +%FT%TZ)" >> "$GITHUB_ENV"
       - uses: actions/checkout@v7.0.1
       - uses: ./.github/actions/setup
         with:
@@ -261,7 +269,7 @@ jobs:
           lane: ${{ matrix.lane }}
           ref: ${{ inputs.ref }}
           result: ${{ job.status }}
-          started-at: ${{ github.run_started_at }}
+          started-at: ${{ env.JOB_STARTED_AT }}
 
   status:
     name: "status"
