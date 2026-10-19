@@ -17,14 +17,21 @@ Si trabajas en grails-core, lee antes el bloque `gradle-memory` de `~/.config/op
    comentarios, labels, secrets…). Este repo no es la excepción.
 4. **`ref` es de `MartinJesusDev/grails-core`**, no de este repo. Los runs de aquí se identifican con
    `run-name: gate [<perfil>] <ref> <módulos>`.
-5. **Nunca dejes un gate sin vigilar.** Dispara y lanza `gh-ci-watch --run-id <id>` en background.
+5. **El watcher es un complemento, no la fuente de verdad.** Dispara y lanza el watcher acotado con
+   log persistente; consulta `gh-ci-status` al inicio de cada turno. Nunca dependas de que el shell del
+   watcher sobreviva (ver "Comandos útiles" y `docs/opencode.md`).
 
 ## Arquitectura
 
 ```
-.github/workflows/gate.yml     # 4 jobs: scoped, all-suites (7 lanes), analyze (3), gate (5)
-.github/actions/setup/action.yml  # checkout del fork al ref + JDK liberica + setup-gradle
+.github/workflows/gate.yml     # 4 jobs: scoped, all-suites (7 lanes), analyze (3), gate (5), + status
+.github/actions/setup/action.yml   # checkout del fork al ref + JDK liberica + setup-gradle
+.github/actions/status/action.yml  # resultado de cada lane → status.json + artifact + resumen
 .github/scripts/gate.sh        # ÚNICA fuente de verdad: perfil + inputs → comando de Gradle
+bin/gh-ci-watch                # espera acotada, con timeout/reintentos y log persistente
+bin/gh-ci-status               # estado de los últimos runs en una sola llamada
+install.sh                     # instala bin/ en ~/.local/bin (enlaces o copias)
+docs/opencode.md               # convención de seguimiento para agentes
 README.md                      # documentación de uso (perfiles, inputs, tiempos, cobertura)
 ```
 
@@ -48,14 +55,16 @@ La tabla completa (qué hace cada uno, cuándo usarlo, tiempos medidos) está en
    lanes). Si el perfil muta el árbol, exige los inputs que acoten el daño (como `fix`, que requiere
    `modules` porque su tarea a nivel raíz reescribe todo el repo).
 2. Si es un perfil con lanes, añade el job con su matriz en `gate.yml` y **exclúyelo** del `if:` del
-   job `scoped` (si no, correría dos veces).
+   job `scoped` (si no, correría dos veces). Añade el paso `Gate status` (`if: always()`,
+   `continue-on-error: true`) al final del job; el job `status` lo agrega sin tocar nada más.
 3. Si necesita un input nuevo, decláralo en `workflow_dispatch.inputs` y pásalo en el `env:` de cada
    job (todos los jobs comparten el mismo contrato de entorno).
 4. Actualiza el `README.md` (tabla de perfiles + cobertura) y, si aplica, los tiempos medidos.
 5. Valida antes de subir:
    ```bash
-   bash -n .github/scripts/gate.sh
+   bash -n .github/scripts/gate.sh bin/gh-ci-watch bin/gh-ci-status install.sh
    python3 -c "import yaml; yaml.safe_load(open('.github/workflows/gate.yml'))"
+   python3 -c "import yaml; yaml.safe_load(open('.github/actions/status/action.yml'))"
    ```
 6. Prueba el perfil con un dispatch real sobre una rama ya pusheada del fork.
 
@@ -72,21 +81,31 @@ La tabla completa (qué hace cada uno, cuándo usarlo, tiempos medidos) está en
   haya cambios: los fixers arreglan, no verifican.
 - **Artefactos en fallo**: `reports-<run_id>-<perfil>` con `**/build/reports/violations/**`,
   `**/build/test-results/**` y el reporte agregado de `grails-test-report`.
+- **Estado por lane**: el paso `Gate status` publica `status-<perfil>-<lane>.json` (artifact
+  `status-<perfil>-<lane>`) y el job `status` agrega todo en `status.json` (artifact `status`) y lo
+  resume en `$GITHUB_STEP_SUMMARY`. Los pasos son `continue-on-error`: si la observabilidad falla, el
+  gate no se vuelve rojo por ello.
 - **Idempotencia**: no añadas pasos que muten el repo fuera de los perfiles de arreglo (`fix`,
   `task` con una tarea que escribe).
 
 ## Comandos útiles
 
 ```bash
+# instalar las herramientas locales (una vez por clon)
+./install.sh
+
 # lanzar
 gh workflow run gate.yml --repo MartinJesusDev/grails-core-ci \
   -f ref=<rama> -f profile=<perfil> [-f modules=":a :b"] [-f extra="..."] [-f tasks="..."]
 
-# vigilar (acepta varios --run-id)
-~/.local/bin/gh-ci-watch --run-id <id> --repo MartinJesusDev/grails-core-ci --interval 60
+# estado (una llamada, ~1 s; sale 0 siempre)
+gh-ci-status --limit 20
 
-# estado
-gh run list --repo MartinJesusDev/grails-core-ci --limit 20 --json databaseId,status,conclusion,displayTitle
+# vigilar (acepta varios --run-id; log en ~/.local/state/gh-ci-watch/<label>.log)
+timeout 1500 gh-ci-watch --run-id <id> --repo MartinJesusDev/grails-core-ci --max-wait 20
+
+# resultado por lane
+gh run download <id> --repo MartinJesusDev/grails-core-ci -n status && jq . status.json
 
 # diagnóstico
 gh run view <id> --repo MartinJesusDev/grails-core-ci --log-failed
@@ -103,4 +122,9 @@ gh run download <id> --repo MartinJesusDev/grails-core-ci
 - `fix` exige `modules` y solo merece la pena cuando `analyze` tiene violaciones: su tarea reescribe
   más de lo que el chequeo mira (incluye test sources), así que con el estilo en verde el parche es
   churn que el PR no debe llevar.
+- **No hay notificación automática en issues**: `GITHUB_TOKEN` solo puede escribir en este repo y el
+  issue de seguimiento vive en `apache/grails-core`. El fallo se ve con `gh-ci-status` y el agente lo
+  comenta desde local con su `gh` autenticado, previa confirmación.
+- **El shell del watcher puede morir** (harness, sesión larga): por eso `gh-ci-watch` escribe siempre
+  `~/.local/state/gh-ci-watch/<label>.log` y `gh-ci-status` es la vía principal de consulta.
 - El CI del PR en apache/grails-core es independiente y no es reducible: este repo es pre-vuelo.

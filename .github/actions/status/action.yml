@@ -1,0 +1,59 @@
+name: Gate status
+description: >-
+  Publica el resultado de una lane como status.json y lo sube como artifact,
+  para poder consultarlo sin abrir los logs.
+
+inputs:
+  profile:
+    description: Perfil del gate (module, gate, all-suites…)
+    required: true
+  lane:
+    description: Lane del job (scoped o el valor de matrix.lane)
+    required: true
+  ref:
+    description: Rama, tag o SHA de MartinJesusDev/grails-core
+    required: true
+  result:
+    description: Resultado del job (job.status)
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Write status.json
+      shell: bash
+      env:
+        PROFILE: ${{ inputs.profile }}
+        LANE: ${{ inputs.lane }}
+        REF: ${{ inputs.ref }}
+        RESULT: ${{ inputs.result }}
+        RUN_ID: ${{ github.run_id }}
+        RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        STARTED_AT: ${{ github.run_started_at }}
+      run: |
+        set -euo pipefail
+        file="status-${PROFILE}-${LANE}.json"
+        # started_at es el inicio del run, no del job: sobra para ordenar y
+        # comparar; añade un paso "Mark start" si necesitas la duración exacta.
+        jq -n \
+          --argjson run_id "$RUN_ID" \
+          --arg profile "$PROFILE" \
+          --arg ref "$REF" \
+          --arg lane "$LANE" \
+          --arg conclusion "$RESULT" \
+          --arg url "$RUN_URL" \
+          --arg started_at "$STARTED_AT" \
+          --arg finished_at "$(date -u +%FT%TZ)" \
+          '{run_id: $run_id, profile: $profile, ref: $ref, lane: $lane,
+            status: "completed", conclusion: $conclusion, url: $url,
+            started_at: $started_at, finished_at: $finished_at}' > "$file"
+        echo "status: $file"
+        jq -c . "$file"
+    - name: Upload status
+      uses: actions/upload-artifact@v7.0.1
+      with:
+        name: status-${{ inputs.profile }}-${{ inputs.lane }}
+        path: status-${{ inputs.profile }}-${{ inputs.lane }}.json
+        retention-days: 7
+        overwrite: true
+        if-no-files-found: error

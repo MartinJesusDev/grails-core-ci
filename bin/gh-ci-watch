@@ -1,0 +1,357 @@
+#!/usr/bin/env bash
+# gh-ci-watch - Espera a que terminen runs de GitHub Actions y resume el resultado.
+#
+# Dos modos:
+#   gh-ci-watch <rama> [--sha <sha>] [--repo OWNER/REPO] [--interval <seg>]
+#       Espera a TODOS los runs de un SHA concreto de una rama (varios workflows).
+#   gh-ci-watch --run-id <id> [--run-id <id> ...] [--repo OWNER/REPO] [--interval <seg>]
+#       Espera a UNO O VARIOS runs concretos y resume sus jobs (útil para
+#       gate.yml del repo herramienta, donde el SHA del run no es el de grails-core).
+#
+# Opciones comunes:
+#   --max-wait <min>  Minutos máximos de espera (por defecto 90). Al alcanzarlos
+#                     imprime el último estado conocido y sale 0: los runs siguen
+#                     en curso, no es un error.
+#
+# El resultado se escribe SIEMPRE, además de en stdout, en un log persistente:
+#   ${XDG_STATE_HOME:-$HOME/.local/state}/gh-ci-watch/<label>.log
+# Para verlo: tail -f ~/.local/state/gh-ci-watch/<label>.log
+#
+# Códigos de salida:
+#   0  todo terminó en verde, o se alcanzó --max-wait con runs pendientes
+#   1  todos terminaron y al menos uno está en rojo
+#   2  uso incorrecto, falta jq o error de API tras los reintentos
+#
+# Todas las llamadas a gh llevan timeout y un máximo de 3 intentos.
+set -euo pipefail
+
+usage() {
+    cat <<'EOF'
+Uso:
+  gh-ci-watch <rama> [--sha <sha>] [--repo OWNER/REPO] [--interval <seg>] [--max-wait <min>]
+  gh-ci-watch --run-id <id> [--run-id <id> ...] [--repo OWNER/REPO] [--interval <seg>] [--max-wait <min>]
+
+  --max-wait <min>  Minutos máximos de espera (por defecto 90). Al agotarse
+                    imprime el estado conocido y sale 0 (los runs siguen en curso).
+  --interval <seg>  Segundos entre sondeos (por defecto 60).
+  --repo OWNER/REPO Repo de los runs (por defecto, el configurado en gh).
+
+El log persistente queda en ${XDG_STATE_HOME:-$HOME/.local/state}/gh-ci-watch/<label>.log
+Códigos: 0 verde o en curso, 1 rojo, 2 error de uso/API.
+EOF
+}
+
+branch=""
+sha=""
+run_ids=()
+repo=""
+interval=60
+max_wait_min=90
+
+gh_timeout=60
+gh_attempts=3
+gh_retry_sleep=10
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --sha)       sha="${2:?falta el valor de --sha}"; shift 2 ;;
+        --run-id)    run_ids+=("${2:?falta el valor de --run-id}"); shift 2 ;;
+        --repo)      repo="${2:?falta el valor de --repo}"; shift 2 ;;
+        --interval)  interval="${2:?falta el valor de --interval}"; shift 2 ;;
+        --max-wait)  max_wait_min="${2:?falta el valor de --max-wait}"; shift 2 ;;
+        -h|--help)   usage; exit 0 ;;
+        -*)          echo "gh-ci-watch: opción desconocida '$1'" >&2; usage >&2; exit 2 ;;
+        *)
+            if [[ -n $branch ]]; then
+                echo "gh-ci-watch: sobra el argumento '$1' (ya hay rama '$branch')" >&2
+                exit 2
+            fi
+            branch="$1"; shift
+            ;;
+    esac
+done
+
+[[ $interval =~ ^[0-9]+$ ]] && (( interval > 0 )) ||
+    { echo "gh-ci-watch: --interval debe ser un entero > 0" >&2; exit 2; }
+[[ $max_wait_min =~ ^[0-9]+$ ]] && (( max_wait_min > 0 )) ||
+    { echo "gh-ci-watch: --max-wait debe ser un entero > 0" >&2; exit 2; }
+[[ -z $sha || $sha =~ ^[0-9a-fA-F]{7,40}$ ]] ||
+    { echo "gh-ci-watch: --sha no parece un SHA: '$sha'" >&2; exit 2; }
+for id in "${run_ids[@]}"; do
+    [[ $id =~ ^[0-9]+$ ]] ||
+        { echo "gh-ci-watch: --run-id debe ser numérico: '$id'" >&2; exit 2; }
+done
+command -v jq >/dev/null || { echo "gh-ci-watch: falta jq" >&2; exit 2; }
+command -v timeout >/dev/null || { echo "gh-ci-watch: falta timeout (coreutils)" >&2; exit 2; }
+
+if (( ${#run_ids[@]} > 0 )); then
+    mode=run-ids
+    label="run-${run_ids[*]}"
+    label=${label// /-}
+elif [[ -n $branch ]]; then
+    mode=branch
+    if [[ -n $sha ]]; then
+        label="sha-${sha:0:12}"
+    else
+        label="branch-${branch//\//_}"
+    fi
+else
+    usage >&2
+    exit 2
+fi
+label=$(printf '%s' "$label" | tr -c 'A-Za-z0-9_.-' '-')
+
+repo_args=()
+[[ -n $repo ]] && repo_args=(--repo "$repo")
+
+state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/gh-ci-watch"
+mkdir -p "$state_dir"
+log_file="$state_dir/$label.log"
+
+{
+    printf '=== %s ===\n' "$(date -Is)"
+    printf 'modo: %s\n' "$mode"
+    [[ -n $repo ]] && printf 'repo: %s\n' "$repo"
+    [[ -n $branch ]] && printf 'rama: %s\n' "$branch"
+    [[ -n $sha ]] && printf 'sha: %s\n' "$sha"
+    (( ${#run_ids[@]} > 0 )) && printf 'runs: %s\n' "${run_ids[*]}"
+    printf 'max-wait: %s min; interval: %s s\n' "$max_wait_min" "$interval"
+} >>"$log_file"
+
+exec > >(tee -a "$log_file") 2>&1
+
+start_epoch=$(date +%s)
+deadline=$(( start_epoch + max_wait_min * 60 ))
+bounded=1
+max_wait_hit=0
+
+gh_out=$(mktemp "${TMPDIR:-/tmp}/gh-ci-watch.XXXXXX")
+trap 'rm -f "$gh_out"' EXIT
+trap 'printf "\n%s  interrumpido; estado parcial en %s\n" "$(date +%H:%M:%S)" "$log_file"; exit 130' INT
+trap 'printf "\n%s  terminado por señal; estado parcial en %s\n" "$(date +%H:%M:%S)" "$log_file"; exit 143' TERM
+
+printf 'gh-ci-watch: log persistente en %s\n' "$log_file"
+printf 'gh-ci-watch: esperando hasta %s min (intervalo %s s)\n' "$max_wait_min" "$interval"
+
+# Ejecuta gh con timeout, recortado al tiempo restante, y hasta 3 intentos.
+# Escribe la salida en $gh_out (evita un subshell de sustitución de comandos,
+# que retrasaría la atención de las señales). Devuelve 124 cuando se agota
+# --max-wait; 2 cuando gh falla de verdad.
+gh_retry() {
+    local attempt rc remaining budget
+    : >"$gh_out"
+    for (( attempt = 1; attempt <= gh_attempts; attempt++ )); do
+        if (( bounded )); then
+            remaining=$(( deadline - $(date +%s) ))
+            (( remaining > 0 )) || return 124
+            budget=$(( remaining < gh_timeout ? remaining : gh_timeout ))
+        else
+            budget=$gh_timeout
+        fi
+
+        timeout --kill-after=5s "${budget}s" gh "$@" >"$gh_out" && return 0
+        rc=$?
+
+        if (( rc == 124 || rc == 137 )); then
+            if (( bounded )); then
+                (( $(date +%s) < deadline )) || return 124
+            fi
+            printf 'gh-ci-watch: gh agotó %ss (intento %s/%s)\n' "$budget" "$attempt" "$gh_attempts" >&2
+        else
+            printf 'gh-ci-watch: gh falló (código %s, intento %s/%s)\n' "$rc" "$attempt" "$gh_attempts" >&2
+        fi
+
+        if (( attempt < gh_attempts )); then
+            sleep "$gh_retry_sleep"
+        fi
+    done
+
+    printf 'gh-ci-watch: gh no respondió tras %s intentos: gh %s\n' "$gh_attempts" "$*" >&2
+    return 2
+}
+
+sleep_next() {
+    local left=$(( deadline - $(date +%s) ))
+    if (( left > interval )); then
+        left=$interval
+    fi
+    if (( left < 1 )); then
+        left=1
+    fi
+    sleep "$left"
+}
+
+print_max_wait_summary() {
+    printf '\nResumen al alcanzar --max-wait %s min (no es un error: los runs pueden seguir en curso)\n' "$max_wait_min"
+    if [[ $mode == run-ids ]]; then
+        for id in "${run_ids[@]}"; do
+            if [[ -n ${cached[$id]:-} ]]; then
+                jq -r '"  \(.databaseId)  \(.status)  \(.conclusion // "-")  \(.url)"' <<<"${cached[$id]}"
+            else
+                printf '  %s  sin respuesta de la API\n' "$id"
+            fi
+        done
+    else
+        if [[ $(jq 'length' <<<"${runs:-[]}") -eq 0 ]]; then
+            printf '  sin runs conocidos%s\n' "${sha:+ para ${sha:0:12}}"
+        else
+            jq -r '.[] | "  \(.databaseId)  \(.workflowName)  \(.status)  \(.conclusion // "-")  \(.url)"' <<<"$runs"
+        fi
+    fi
+    printf '\nLog persistente: %s\n' "$log_file"
+    printf 'Consulta el estado cuando quieras: gh-ci-status --repo %s\n' "${repo:-MartinJesusDev/grails-core-ci}"
+    printf 'Los runs siguen en curso; el código 0 no significa que hayan terminado.\n'
+}
+
+# --- Modo run-id (uno o varios) -------------------------------------------
+if [[ $mode == run-ids ]]; then
+    declare -A cached=()
+
+    while :; do
+        pending=0
+        for id in "${run_ids[@]}"; do
+            rc=0
+            gh_retry run view "$id" "${repo_args[@]}" \
+                --json databaseId,workflowName,status,conclusion,headSha,headBranch,url,displayTitle || rc=$?
+            if (( rc == 124 )); then
+                max_wait_hit=1
+                break 2
+            elif (( rc != 0 )); then
+                exit 2
+            fi
+            json=$(<"$gh_out")
+
+            cached[$id]=$json
+            status=$(jq -r '.status' <<<"$json")
+            if [[ $status != completed ]]; then
+                pending=$(( pending + 1 ))
+            fi
+        done
+
+        if (( pending == 0 )); then
+            break
+        fi
+        printf '%s  %s/%s run(s) pendientes\n' "$(date +%H:%M:%S)" "$pending" "${#run_ids[@]}"
+        sleep_next
+    done
+
+    if (( max_wait_hit )); then
+        print_max_wait_summary
+        exit 0
+    fi
+
+    bounded=0
+    failed=0
+    for id in "${run_ids[@]}"; do
+        run=${cached[$id]:-}
+        if [[ -z $run ]]; then
+            printf 'gh-ci-watch: sin datos del run %s\n' "$id" >&2
+            failed=1
+            continue
+        fi
+
+        conclusion=$(jq -r '.conclusion // ""' <<<"$run")
+        printf '\nRun:   %s\n' "$(jq -r '.url' <<<"$run")"
+        printf '       %s\n' "$(jq -r '.displayTitle' <<<"$run")"
+        printf '       SHA %s  rama %s\n\n' "$(jq -r '.headSha' <<<"$run")" "$(jq -r '.headBranch' <<<"$run")"
+
+        jobs=""
+        rc=0
+        gh_retry run view "$id" "${repo_args[@]}" --json jobs \
+            --jq '.jobs[] | "\(if .conclusion == "success" then "OK" elif (.conclusion == "skipped" or .conclusion == "neutral") then "--" else "KO" end) \(.name)"' 2>/dev/null || rc=$?
+        if (( rc == 0 )); then
+            jobs=$(<"$gh_out")
+        else
+            printf '    (no se pudieron leer los jobs; usa gh run view %s --log-failed)\n' "$id"
+            jobs=""
+        fi
+        if [[ -n $jobs ]]; then
+            jobs=$(sort <<<"$jobs")
+            if [[ $(wc -l <<<"$jobs") -gt 1 ]]; then
+                printf '%s\n' "$jobs"
+            fi
+        fi
+
+        case "$conclusion" in
+            success|skipped|neutral)
+                printf '    => OK  %s\n' "$conclusion"
+                ;;
+            *)
+                printf '    => KO  %s   (gh run view %s --log-failed)\n' "${conclusion:-?}" "$id"
+                failed=1
+                ;;
+        esac
+    done
+
+    echo
+    if (( failed )); then
+        echo "gh-ci-watch: hay runs en rojo."
+        exit 1
+    fi
+    echo "gh-ci-watch: todo en verde."
+    exit 0
+fi
+
+# --- Modo rama + SHA ------------------------------------------------------
+fields="databaseId,workflowName,status,conclusion,headSha,url,createdAt"
+runs="[]"
+
+if [[ -z $sha ]]; then
+    rc=0
+    gh_retry run list --branch "$branch" "${repo_args[@]}" --limit 1 \
+        --json headSha --jq '.[0].headSha // ""' || rc=$?
+    if (( rc == 124 )); then
+        print_max_wait_summary
+        exit 0
+    elif (( rc != 0 )); then
+        exit 2
+    fi
+    sha=$(<"$gh_out")
+    if [[ -z $sha ]]; then
+        echo "gh-ci-watch: no hay runs en la rama $branch" >&2
+        exit 2
+    fi
+fi
+
+while :; do
+    rc=0
+    gh_retry run list --branch "$branch" "${repo_args[@]}" --limit 40 --json "$fields" \
+        --jq "[.[] | select(.headSha == \"$sha\")]" || rc=$?
+    if (( rc == 124 )); then
+        max_wait_hit=1
+        break
+    elif (( rc != 0 )); then
+        exit 2
+    fi
+    runs=$(<"$gh_out")
+
+    total=$(jq 'length' <<<"$runs")
+    pending=$(jq '[.[] | select(.status != "completed")] | length' <<<"$runs")
+    if (( total > 0 && pending == 0 )); then
+        break
+    fi
+    printf '%s  %s run(s) para %.8s, %s pendiente(s)\n' "$(date +%H:%M:%S)" "$total" "$sha" "$pending"
+    sleep_next
+done
+
+if (( max_wait_hit )); then
+    print_max_wait_summary
+    exit 0
+fi
+
+echo
+printf 'SHA:   %s\n' "$sha"
+printf 'Rama:  %s\n\n' "$branch"
+jq -r '.[] | "\(if .conclusion == "success" then "OK " elif (.conclusion == "skipped" or .conclusion == "neutral") then "-- " else "KO " end) \(.workflowName) [\(.conclusion)] \(.url)"' <<<"$runs" | sort
+
+if jq -e 'any(.[]; .conclusion == "failure" or .conclusion == "cancelled" or .conclusion == "timed_out" or .conclusion == "startup_failure" or .conclusion == "action_required")' <<<"$runs" >/dev/null; then
+    echo
+    echo "gh-ci-watch: hay runs fallidos. Detalle:"
+    jq -r '.[] | select(.conclusion == "failure" or .conclusion == "cancelled" or .conclusion == "timed_out" or .conclusion == "startup_failure" or .conclusion == "action_required") | "  \(.databaseId)  \(.workflowName)"' <<<"$runs"
+    echo "  gh run view <id> --log-failed"
+    exit 1
+fi
+
+echo
+echo "gh-ci-watch: todo en verde para $(printf '%.8s' "$sha")."
+exit 0

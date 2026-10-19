@@ -17,6 +17,24 @@ gh workflow run gate.yml --repo MartinJesusDev/grails-core-ci \
   -f ref=fix/mi-rama -f profile=module -f modules=":grails-views-gson"
 ```
 
+## Primeros pasos (clonar y configurar)
+
+Requisitos: `gh` autenticado (`gh auth status`), `jq`, `timeout` y `column`
+(coreutils/util-linux). Todo lo demás vive en este repo.
+
+```bash
+git clone git@github.com:MartinJesusDev/grails-core-ci.git
+cd grails-core-ci
+./install.sh          # enlaces en ~/.local/bin (git pull actualiza las herramientas)
+./install.sh --copy   # alternativa: copia los scripts
+gh-ci-status          # comprueba la conexión y el estado de los últimos runs
+```
+
+`install.sh` instala `gh-ci-status` y `gh-ci-watch`, y crea
+`~/.local/state/gh-ci-watch/` para los logs persistentes. La convención para
+OpenCode (seguimiento sin depender de un proceso vivo) está en
+[`docs/opencode.md`](docs/opencode.md).
+
 ## Perfiles: qué hace cada uno y cuándo usarlo
 
 | `profile` | Qué ejecuta exactamente | Cuándo usarlo | Tiempo |
@@ -165,11 +183,68 @@ Los pasos 4-6 corren **en paralelo** (perfiles distintos, grupos de concurrencia
 
 ## Leer los resultados
 
-- `~/.local/bin/gh-ci-watch --run-id <id> --repo MartinJesusDev/grails-core-ci` — espera y resume
-  (acepta varios `--run-id`). Resume también los jobs internos de los perfiles con lanes.
-- `/grails-core-ci-status` (OpenCode) — gates en vuelo y recientes.
-- En fallo se suben además `reports-*` (violations y test-results, 7 días).
-- `gh run view <id> --log-failed` para el log; `gh run download <id>` para todos los artefactos.
+### `gh-ci-status` (vía principal)
+
+`gh-ci-status` imprime el estado de los últimos runs en **una sola llamada** y
+sale 0 siempre; es el comando que se ejecuta al inicio de cada turno mientras
+haya gates en vuelo:
+
+```bash
+gh-ci-status                  # últimos 10 runs de grails-core-ci
+gh-ci-status --limit 20
+gh-ci-status --repo MartinJesusDev/grails-core
+```
+
+```
+ID           ESTADO       CONCLUSIÓN  PERFIL      REF              ACTUALIZADO (UTC)
+39236937813  completed    success     gate        fix/mi-rama      2026-10-19 11:55
+39256623258  in_progress  -           all-suites  fix/mi-rama      2026-10-19 13:01
+```
+
+### `gh-ci-watch` (complemento, con log persistente)
+
+Espera y resume; ya no es la única forma de enterarse. Todas las llamadas a
+`gh` llevan `timeout` y reintentos, y el resultado se escribe siempre en
+`~/.local/state/gh-ci-watch/<label>.log`:
+
+```bash
+gh-ci-watch --run-id 39236937813 --repo MartinJesusDev/grails-core-ci
+gh-ci-watch fix/mi-rama --sha <sha> --repo MartinJesusDev/grails-core --max-wait 300
+```
+
+- `--max-wait <min>` (por defecto 90): si los runs siguen en curso, imprime el
+  último estado y sale 0. Códigos: `0` verde o en curso, `1` rojo, `2` error de
+  uso/API.
+- Para lanzarlo en background desde un agente sin que lo mate el harness:
+  `timeout 1500 gh-ci-watch --run-id <id> --max-wait 20 > /tmp/opencode/ci-watch-<id>.log 2>&1 || true`.
+  Si el shell desaparece, el log persistente y `gh-ci-status` siguen ahí.
+
+### Resultado por lane (`status.json`)
+
+Cada job del gate publica `status-<perfil>-<lane>.json` como artifact y el job
+`status` agrega todos en `status.json` (array con `run_id`, `profile`, `ref`,
+`lane`, `status`, `conclusion`, `url`, `started_at`, `finished_at`) y resume la
+tabla en la página del run:
+
+```bash
+gh run download <run-id> --repo MartinJesusDev/grails-core-ci -n status
+jq . status.json
+gh run download <run-id> --repo MartinJesusDev/grails-core-ci -n status-gate-core
+```
+
+El resumen del run incluye la tabla `Lane | Perfil | Resultado`; si no hay
+`status.json` (run cancelado antes del paso de estado), el job `status` lo dice
+y no falla por ello.
+
+### Diagnóstico
+
+- `gh run view <id> --log-failed` para el log; `gh run download <id>` para todos
+  los artefactos; en fallo se suben además `reports-*` (violations y
+  test-results, 7 días).
+- El fallo **no** se comenta en issues automáticamente: `GITHUB_TOKEN` solo
+  escribe en este repo y el issue de seguimiento vive en `apache/grails-core`.
+  El agente lo comenta desde local, con confirmación, tras ver el rojo en
+  `gh-ci-status`.
 
 ## Tiempos medidos
 
@@ -204,4 +279,6 @@ Para comparar: la matriz completa del repo son ~60 jobs y 2-4 h de reloj.
 - Las versiones de `actions/*` y `gradle/actions/setup-gradle` se mantienen alineadas con las del
   repo principal (ver `.github/workflows/gate.yml`).
 - `.github/scripts/gate.sh` es el único sitio donde vive la lógica de perfiles.
+- `bin/gh-ci-watch` y `bin/gh-ci-status` son la única copia de las herramientas locales; `install.sh`
+  las enlaza en `~/.local/bin` (o las copia con `--copy`). No las dupliques fuera del repo.
 - Ver `AGENTS.md` para las convenciones si vas a tocar este repo con un agente.

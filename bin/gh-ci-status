@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# gh-ci-status - Estado de los runs de GitHub Actions en una tabla.
+#
+# Uso:
+#   gh-ci-status [--limit N] [--repo OWNER/REPO]
+#
+# Hace UNA sola llamada a la API y no escribe nada: es el comando barato que se
+# ejecuta al inicio de cada turno mientras haya gates en vuelo.
+#
+# Sale 0 siempre que la consulta se pueda intentar (también si hay runs en curso
+# o si la API no responde); solo un uso incorrecto devuelve 2.
+set -euo pipefail
+
+repo="MartinJesusDev/grails-core-ci"
+limit=10
+
+usage() {
+    cat <<'EOF'
+Uso: gh-ci-status [--limit N] [--repo OWNER/REPO]
+
+  --limit N         Número de runs a mostrar (por defecto 10).
+  --repo OWNER/REPO Repo a consultar (por defecto MartinJesusDev/grails-core-ci).
+
+Columnas: ID, ESTADO, CONCLUSIÓN, PERFIL, REF, ACTUALIZADO (UTC).
+El perfil y el ref se extraen del displayTitle de gate.yml; si no encaja,
+se usan el nombre del workflow y la rama del repo herramienta.
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --limit) limit="${2:?falta el valor de --limit}"; shift 2 ;;
+        --repo)  repo="${2:?falta el valor de --repo}"; shift 2 ;;
+        -h|--help) usage; exit 0 ;;
+        *) echo "gh-ci-status: opción desconocida '$1'" >&2; usage >&2; exit 2 ;;
+    esac
+done
+
+[[ $limit =~ ^[0-9]+$ ]] && (( limit > 0 )) ||
+    { echo "gh-ci-status: --limit debe ser un entero > 0" >&2; exit 2; }
+
+command -v gh >/dev/null || { echo "gh-ci-status: falta gh" >&2; exit 0; }
+command -v jq >/dev/null || { echo "gh-ci-status: falta jq" >&2; exit 0; }
+
+json=""
+if ! json=$(timeout 30 gh run list --repo "$repo" --limit "$limit" \
+    --json databaseId,status,conclusion,displayTitle,headBranch,updatedAt,url); then
+    echo "gh-ci-status: no se pudo consultar $repo (¿red o gh auth?)" >&2
+    exit 0
+fi
+
+if [[ -z $json || $json == "[]" ]]; then
+    echo "gh-ci-status: no hay runs en $repo"
+    exit 0
+fi
+
+table=$(
+    jq -r '
+        (["ID", "ESTADO", "CONCLUSIÓN", "PERFIL", "REF", "ACTUALIZADO (UTC)"] | @tsv),
+        (.[] | [
+            (.databaseId | tostring),
+            .status,
+            (if (.conclusion // "") == "" then "-" else .conclusion end),
+            ((.displayTitle | try capture("^gate \\[(?<p>[^]]+)\\]") catch null | .p) // .workflowName),
+            ((.displayTitle | try capture("^gate \\[[^]]+\\] (?<r>[^ ]+)") catch null | .r) // .headBranch),
+            (.updatedAt | fromdateiso8601 | strftime("%Y-%m-%d %H:%M"))
+        ] | @tsv)
+    ' <<<"$json"
+)
+
+if command -v column >/dev/null; then
+    column -t -s $'\t' <<<"$table"
+else
+    printf '%s\n' "$table"
+fi
