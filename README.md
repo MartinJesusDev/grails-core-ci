@@ -223,7 +223,8 @@ gh-ci-watch fix/mi-rama --sha <sha> --repo MartinJesusDev/grails-core --max-wait
 
 Cada job del gate publica `status-<perfil>-<lane>.json` como artifact y el job
 `status` agrega todos en `status.json` (array con `run_id`, `profile`, `ref`,
-`lane`, `status`, `conclusion`, `url`, `started_at`, `finished_at`) y resume la
+`lane`, `status`, `conclusion`, `url`, `started_at` (inicio de la lane),
+`finished_at`) y resume la
 tabla en la página del run:
 
 ```bash
