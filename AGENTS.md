@@ -17,9 +17,10 @@ Si trabajas en grails-core, lee antes el bloque `gradle-memory` de `~/.config/op
    comentarios, labels, secrets…). Este repo no es la excepción.
 4. **`ref` es de `MartinJesusDev/grails-core`**, no de este repo. Los runs de aquí se identifican con
    `run-name: gate [<perfil>] <ref> <módulos>`.
-5. **El watcher es un complemento, no la fuente de verdad.** Dispara y lanza el watcher acotado con
-   log persistente; consulta `gh-ci-status` al inicio de cada turno. Nunca dependas de que el shell del
-   watcher sobreviva (ver "Comandos útiles" y `docs/opencode.md`).
+5. **El aviso llega con el watcher en background.** Dispara y lanza UN watcher no bloqueante con
+   todos los run-ids pendientes (`--max-wait 75`, `background: true`, log persistente); avisa al
+   terminar. `gh-ci-status` es la consulta previa y la red si el shell desaparece (ver "Comandos
+   útiles" y `docs/opencode.md`).
 
 ## Arquitectura
 
@@ -41,6 +42,9 @@ README.md                      # documentación de uso (perfiles, inputs, tiempo
 - El checkout del fork va a `./grails-core` (el workspace raíz es este repo, para poder usar la
   acción compuesta local).
 - Las versiones de `actions/*` y `gradle/actions/setup-gradle` se copian del repo principal.
+- `install.sh` solo instala `bin/` en `~/.local/bin`; la configuración global de OpenCode
+  (`~/.config/opencode/AGENTS.md` y `opencode.jsonc`) no se toca desde el repo. Un agente con acceso al
+  home puede aplicarla con confirmación (ver `docs/opencode.md`).
 
 ## Perfiles
 
@@ -98,11 +102,16 @@ La tabla completa (qué hace cada uno, cuándo usarlo, tiempos medidos) está en
 gh workflow run gate.yml --repo MartinJesusDev/grails-core-ci \
   -f ref=<rama> -f profile=<perfil> [-f modules=":a :b"] [-f extra="..."] [-f tasks="..."]
 
-# estado (una llamada, ~1 s; sale 0 siempre)
+# estado previo y red si el shell desaparece (una llamada, ~1 s; sale 0 siempre)
 gh-ci-status --limit 20
 
-# vigilar (acepta varios --run-id; log en ~/.local/state/gh-ci-watch/<label>.log)
-timeout 1500 gh-ci-watch --run-id <id> --repo MartinJesusDev/grails-core-ci --max-wait 20
+# ver watchers viejos antes de lanzar el nuevo
+pgrep -af gh-ci-watch
+
+# vigilar en background, sin bloquear el turno (tool shell: background: true)
+timeout 5400 gh-ci-watch --run-id <id> [--run-id <id> ...] \
+  --repo MartinJesusDev/grails-core-ci --interval 60 --max-wait 75 \
+  > /tmp/opencode/ci-watch-<label>.log 2>&1
 
 # resultado por lane
 gh run download <id> --repo MartinJesusDev/grails-core-ci -n status && jq . status.json
@@ -125,6 +134,8 @@ gh run download <id> --repo MartinJesusDev/grails-core-ci
 - **No hay notificación automática en issues**: `GITHUB_TOKEN` solo puede escribir en este repo y el
   issue de seguimiento vive en `apache/grails-core`. El fallo se ve con `gh-ci-status` y el agente lo
   comenta desde local con su `gh` autenticado, previa confirmación.
-- **El shell del watcher puede morir** (harness, sesión larga): por eso `gh-ci-watch` escribe siempre
-  `~/.local/state/gh-ci-watch/<label>.log` y `gh-ci-status` es la vía principal de consulta.
+- **Si el shell desaparece** (reinicio del server, cierre de la app, suspensión): el watcher en
+  background no puede avisar. No re-dispares el gate: lee
+  `~/.local/state/gh-ci-watch/<label>.log` o ejecuta `gh-ci-status`. El log persistente es la red,
+  no la vía principal.
 - El CI del PR en apache/grails-core es independiente y no es reducible: este repo es pre-vuelo.

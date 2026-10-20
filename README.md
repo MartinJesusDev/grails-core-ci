@@ -31,9 +31,9 @@ gh-ci-status          # comprueba la conexión y el estado de los últimos runs
 ```
 
 `install.sh` instala `gh-ci-status` y `gh-ci-watch`, y crea
-`~/.local/state/gh-ci-watch/` para los logs persistentes. La convención para
-OpenCode (seguimiento sin depender de un proceso vivo) está en
-[`docs/opencode.md`](docs/opencode.md).
+`~/.local/state/gh-ci-watch/` para los logs persistentes. **No toca OpenCode**:
+la convención para el agente (bloque de `AGENTS.md` y, si usas comandos
+propios, `opencode.jsonc`) está en [`docs/opencode.md`](docs/opencode.md).
 
 ## Perfiles: qué hace cada uno y cuándo usarlo
 
@@ -183,11 +183,11 @@ Los pasos 4-6 corren **en paralelo** (perfiles distintos, grupos de concurrencia
 
 ## Leer los resultados
 
-### `gh-ci-status` (vía principal)
+### `gh-ci-status` (consulta a demanda)
 
 `gh-ci-status` imprime el estado de los últimos runs en **una sola llamada** y
-sale 0 siempre; es el comando que se ejecuta al inicio de cada turno mientras
-haya gates en vuelo:
+sale 0 siempre; úsalo para ver qué sigue en vuelo antes de lanzar, o si el
+shell del watcher desaparece:
 
 ```bash
 gh-ci-status                  # últimos 10 runs de grails-core-ci
@@ -201,23 +201,30 @@ ID           ESTADO       CONCLUSIÓN  PERFIL      REF              ACTUALIZADO 
 39256623258  in_progress  -           all-suites  fix/mi-rama      2026-10-19 13:01
 ```
 
-### `gh-ci-watch` (complemento, con log persistente)
+### `gh-ci-watch` (background; el log persistente es la red)
 
-Espera y resume; ya no es la única forma de enterarse. Todas las llamadas a
-`gh` llevan `timeout` y reintentos, y el resultado se escribe siempre en
+Es el aviso principal: se lanza en background, no bloquea el turno y OpenCode
+avisa cuando termina. Todas las llamadas a `gh` llevan `timeout` y reintentos,
+y el resultado se escribe además en
 `~/.local/state/gh-ci-watch/<label>.log`:
 
 ```bash
-gh-ci-watch --run-id 39236937813 --repo MartinJesusDev/grails-core-ci
+gh-ci-watch --run-id 39236937813 --run-id 39256610186 \
+  --repo MartinJesusDev/grails-core-ci --interval 60 --max-wait 75
 gh-ci-watch fix/mi-rama --sha <sha> --repo MartinJesusDev/grails-core --max-wait 300
 ```
 
-- `--max-wait <min>` (por defecto 90): si los runs siguen en curso, imprime el
-  último estado y sale 0. Códigos: `0` verde o en curso, `1` rojo, `2` error de
-  uso/API.
-- Para lanzarlo en background desde un agente sin que lo mate el harness:
-  `timeout 1500 gh-ci-watch --run-id <id> --max-wait 20 > /tmp/opencode/ci-watch-<id>.log 2>&1 || true`.
-  Si el shell desaparece, el log persistente y `gh-ci-status` siguen ahí.
+- En el flujo de cierre se usa `--max-wait 75`, que cubre `gate` (60 min) y
+  `all-suites` (50). El defecto del script sigue siendo 90. Códigos: `0` verde
+  o en curso, `1` rojo, `2` error de uso/API.
+- En OpenCode: tool shell con `background: true` y
+  `timeout 5400 gh-ci-watch ... > /tmp/opencode/ci-watch-<label>.log 2>&1`.
+  No bloquea: la salida por minuto se ve en la tarea y el aviso llega al
+  terminar. No hay notificación push por cada línea.
+- Si el shell desaparece (reinicio, cierre, suspensión), no re-dispares: lee
+  `~/.local/state/gh-ci-watch/<label>.log` o `gh-ci-status`.
+- Primer plano solo si quieres esperar en el turno: el mismo comando sin
+  background, con `timeout: 0` en el tool shell.
 
 ### Resultado por lane (`status.json`)
 
