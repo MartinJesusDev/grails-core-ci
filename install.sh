@@ -10,7 +10,7 @@ set -euo pipefail
 
 src_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 bin_dir="${BIN_DIR:-$HOME/.local/bin}"
-state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/gh-ci-watch"
+state_dir="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/gh-ci-watch-$(id -u)"
 mode=symlink
 
 case "${1:-}" in
@@ -21,6 +21,7 @@ case "${1:-}" in
 esac
 
 mkdir -p "$bin_dir" "$state_dir"
+chmod 700 "$state_dir" 2>/dev/null || true
 
 for tool in gh-ci-watch gh-ci-status; do
     src="$src_dir/bin/$tool"
@@ -47,5 +48,5 @@ else
     echo "dependencias OK: gh jq timeout column"
 fi
 
-echo "estado persistente: $state_dir"
+echo "logs de sesión: $state_dir"
 echo "siguiente paso: gh auth status && gh-ci-status"

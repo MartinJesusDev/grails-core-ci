@@ -13,9 +13,10 @@
 #                     imprime el último estado conocido y sale 0: los runs siguen
 #                     en curso, no es un error.
 #
-# El resultado se escribe SIEMPRE, además de en stdout, en un log persistente:
-#   ${XDG_STATE_HOME:-$HOME/.local/state}/gh-ci-watch/<label>.log
-# Para verlo: tail -f ~/.local/state/gh-ci-watch/<label>.log
+# El resultado se escribe SIEMPRE, además de en stdout, en un log de sesión:
+#   ${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/gh-ci-watch-<uid>/<label>.log
+# Vive en runtime/tmp: se borra al cerrar sesión o reiniciar, así que no se
+# acumula. Para verlo: tail -f ${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/gh-ci-watch-<uid>/<label>.log
 #
 # Códigos de salida:
 #   0  todo terminó en verde, o se alcanzó --max-wait con runs pendientes
@@ -24,6 +25,7 @@
 #
 # Todas las llamadas a gh llevan timeout y un máximo de 3 intentos.
 set -euo pipefail
+umask 077
 
 usage() {
     cat <<'EOF'
@@ -36,7 +38,8 @@ Uso:
   --interval <seg>  Segundos entre sondeos (por defecto 60).
   --repo OWNER/REPO Repo de los runs (por defecto, el configurado en gh).
 
-El log persistente queda en ${XDG_STATE_HOME:-$HOME/.local/state}/gh-ci-watch/<label>.log
+El log de sesión queda en ${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/gh-ci-watch-<uid>/<label>.log
+Se borra al cerrar sesión o reiniciar; no se acumula.
 Códigos: 0 verde o en curso, 1 rojo, 2 error de uso/API.
 EOF
 }
@@ -104,8 +107,9 @@ label=$(printf '%s' "$label" | tr -c 'A-Za-z0-9_.-' '-')
 repo_args=()
 [[ -n $repo ]] && repo_args=(--repo "$repo")
 
-state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/gh-ci-watch"
+state_dir="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/gh-ci-watch-$(id -u)"
 mkdir -p "$state_dir"
+chmod 700 "$state_dir" 2>/dev/null || true
 log_file="$state_dir/$label.log"
 
 {
@@ -130,7 +134,7 @@ trap 'rm -f "$gh_out"' EXIT
 trap 'printf "\n%s  interrumpido; estado parcial en %s\n" "$(date +%H:%M:%S)" "$log_file"; exit 130' INT
 trap 'printf "\n%s  terminado por señal; estado parcial en %s\n" "$(date +%H:%M:%S)" "$log_file"; exit 143' TERM
 
-printf 'gh-ci-watch: log persistente en %s\n' "$log_file"
+printf 'gh-ci-watch: log de sesión en %s\n' "$log_file"
 printf 'gh-ci-watch: esperando hasta %s min (intervalo %s s)\n' "$max_wait_min" "$interval"
 
 # Ejecuta gh con timeout, recortado al tiempo restante, y hasta 3 intentos.
@@ -198,7 +202,7 @@ print_max_wait_summary() {
             jq -r '.[] | "  \(.databaseId)  \(.workflowName)  \(.status)  \(.conclusion // "-")  \(.url)"' <<<"$runs"
         fi
     fi
-    printf '\nLog persistente: %s\n' "$log_file"
+    printf '\nLog de sesión: %s\n' "$log_file"
     printf 'Consulta el estado cuando quieras: gh-ci-status --repo %s\n' "${repo:-MartinJesusDev/grails-core-ci}"
     printf 'Los runs siguen en curso; el código 0 no significa que hayan terminado.\n'
 }

@@ -30,8 +30,8 @@ cd grails-core-ci
 gh-ci-status          # comprueba la conexión y el estado de los últimos runs
 ```
 
-`install.sh` instala `gh-ci-status` y `gh-ci-watch`, y crea
-`~/.local/state/gh-ci-watch/` para los logs persistentes. **No toca OpenCode**:
+`install.sh` instala `gh-ci-status` y `gh-ci-watch`, y crea el directorio de logs de sesión en
+runtime/tmp (`${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/gh-ci-watch-<uid>/`). **No toca OpenCode**:
 la convención para el agente (bloque de `AGENTS.md` y, si usas comandos
 propios, `opencode.jsonc`) está en [`docs/opencode.md`](docs/opencode.md).
 
@@ -201,12 +201,13 @@ ID           ESTADO       CONCLUSIÓN  PERFIL      REF              ACTUALIZADO 
 39256623258  in_progress  -           all-suites  fix/mi-rama      2026-10-19 13:01
 ```
 
-### `gh-ci-watch` (background; el log persistente es la red)
+### `gh-ci-watch` (background; el log de sesión es la red)
 
 Es el aviso principal: se lanza en background, no bloquea el turno y OpenCode
 avisa cuando termina. Todas las llamadas a `gh` llevan `timeout` y reintentos,
-y el resultado se escribe además en
-`~/.local/state/gh-ci-watch/<label>.log`:
+y el resultado se escribe además en un log de sesión
+(`${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/gh-ci-watch-<uid>/<label>.log`), que se
+borra al cerrar sesión o reiniciar:
 
 ```bash
 gh-ci-watch --run-id 39236937813 --run-id 39256610186 \
@@ -218,11 +219,13 @@ gh-ci-watch fix/mi-rama --sha <sha> --repo MartinJesusDev/grails-core --max-wait
   `all-suites` (50). El defecto del script sigue siendo 90. Códigos: `0` verde
   o en curso, `1` rojo, `2` error de uso/API.
 - En OpenCode: tool shell con `background: true` y
-  `timeout 5400 gh-ci-watch ... > /tmp/opencode/ci-watch-<label>.log 2>&1`.
-  No bloquea: la salida por minuto se ve en la tarea y el aviso llega al
-  terminar. No hay notificación push por cada línea.
-- Si el shell desaparece (reinicio, cierre, suspensión), no re-dispares: lee
-  `~/.local/state/gh-ci-watch/<label>.log` o `gh-ci-status`.
+  `timeout 5400 gh-ci-watch ...`. No bloquea: la salida por minuto se ve en la
+  tarea y el aviso final trae el resumen del watcher. No hay notificación push
+  por cada línea.
+- Si el shell desaparece (reinicio del server de OpenCode, cierre de la app,
+  suspensión), no re-dispares: lee el log de sesión si el runtime sigue vivo, o
+  `gh-ci-status`. Tras reiniciar el PC o cerrar sesión, el log ya no está: usa
+  `gh-ci-status`/`status.json`.
 - Primer plano solo si quieres esperar en el turno: el mismo comando sin
   background, con `timeout: 0` en el tool shell.
 
